@@ -3,7 +3,7 @@ import MonopolyABI from "./abi/MonopolyAssets.json";
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const CONTRACT_ADDRESS = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9";
 const ALLOWED_CHAIN_IDS = [31337, 1337];
 
 function App() {

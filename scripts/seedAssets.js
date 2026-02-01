@@ -5,7 +5,7 @@ function sleep(seconds) {
 }
 
 async function main() {
-  const CONTRACT = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+  const CONTRACT = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9";
   
   const [deployer] = await ethers.getSigners();
   const assets = await ethers.getContractAt("MonopolyAssets", CONTRACT);
@@ -40,18 +40,16 @@ async function main() {
     console.log(`  Créé: ${a.name}`);
   }
 
-  console.log("\  Minting des assets vers:", deployer.address);
-  
-  for (let i = 0; i < list.length; i++) {
-    const tokenId = i + 1;
-    const mintTx = await assets.mintTo(deployer.address, tokenId, 1);
-    await mintTx.wait();
-    console.log(`  Asset ${tokenId} minté (${list[i].name})`);
-    
-    if (i < list.length - 1) {
-      await sleep(3);
-    }
-  }
+ console.log("Création des assets...");
+
+for (const a of list) {
+  const tx = await assets.createAsset(a.name, a.type, a.value, a.ipfs);
+  await tx.wait();
+  console.log(`Créé: ${a.name}`);
+}
+
+console.log("Seed terminé !");
+
 
   console.log("\  Seed terminé !");
 }
