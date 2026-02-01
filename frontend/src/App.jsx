@@ -3,294 +3,212 @@ import MonopolyABI from "./abi/MonopolyAssets.json";
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const CONTRACT_ADDRESS = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
-
-// Hardhat local = souvent 31337, parfois 1337 selon MetaMask/config
+const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 const ALLOWED_CHAIN_IDS = [31337, 1337];
 
 function App() {
   const [account, setAccount] = useState(null);
   const [contract, setContract] = useState(null);
-
   const [assets, setAssets] = useState([]);
   const [debug, setDebug] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // --------------------
-  // IPFS helpers
-  // --------------------
-  const ipfsToCid = (val) => {
-    if (!val) return "";
-    return val.startsWith("ipfs://") ? val.replace("ipfs://", "") : val;
-  };
+  // ---------- helpers IPFS ----------
+// ---------- helpers IPFS ----------
+const IPFS_GATEWAY = "https://pink-working-bear-503.mypinata.cloud/ipfs/";
 
-  const toGatewayUrl = (ipfsOrCid, gatewayBase = "https://ipfs.io/ipfs/") => {
-    const v = ipfsOrCid ?? "";
-    if (typeof v !== "string") return "";
-    if (v.startsWith("http://") || v.startsWith("https://")) return v;
-    const cid = ipfsToCid(v);
-    return `${gatewayBase}${cid}`;
-  };
+const ipfsToHttp = (uri) => {
+  if (!uri) return "";
+  return uri.replace("ipfs://", IPFS_GATEWAY);
+};
 
-  const readableError = (e) => {
-    return (
-      e?.info?.error?.message ||
-      e?.data?.message ||
-      e?.error?.message ||
-      e?.reason ||
-      e?.shortMessage ||
-      e?.message ||
-      "Erreur inconnue"
-    );
-  };
 
-  // --------------------
-  // MetaMask events
-  // --------------------
+
+
+  const readableError = (e) =>
+    e?.info?.error?.message ||
+    e?.data?.message ||
+    e?.reason ||
+    e?.message ||
+    "Erreur inconnue";
+
+  // ---------- metamask events ----------
   useEffect(() => {
     if (!window.ethereum) return;
 
-    const onAccountsChanged = (accs) => {
-      if (!accs || accs.length === 0) {
-        setAccount(null);
-        setContract(null);
-        setAssets([]);
-        setDebug("⚠️ Wallet déconnecté dans MetaMask.");
-        return;
-      }
-      setAccount(accs[0]);
-      setDebug("");
-    };
+    const accChanged = (a) => setAccount(a?.[0] || null);
+    const chainChanged = () => window.location.reload();
 
-    const onChainChanged = () => {
-      window.location.reload();
-    };
-
-    window.ethereum.on("accountsChanged", onAccountsChanged);
-    window.ethereum.on("chainChanged", onChainChanged);
+    window.ethereum.on("accountsChanged", accChanged);
+    window.ethereum.on("chainChanged", chainChanged);
 
     return () => {
-      window.ethereum.removeListener("accountsChanged", onAccountsChanged);
-      window.ethereum.removeListener("chainChanged", onChainChanged);
+      window.ethereum.removeListener("accountsChanged", accChanged);
+      window.ethereum.removeListener("chainChanged", chainChanged);
     };
   }, []);
 
-  // --------------------
-  // CONNECT
-  // --------------------
+  // ---------- connect ----------
   const connectWallet = async () => {
+    setLoading(true);
+    setDebug("");
+
     try {
-      setDebug("");
-      setLoading(true);
+      if (!window.ethereum) throw new Error("Installe MetaMask");
 
-      if (!window.ethereum) {
-        alert("Installe MetaMask !");
-        return;
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const net = await provider.getNetwork();
+
+      if (!ALLOWED_CHAIN_IDS.includes(Number(net.chainId))) {
+        throw new Error("Mauvais réseau (Localhost 8545 requis)");
       }
 
-      const prov = new ethers.BrowserProvider(window.ethereum);
-
-      // Vérifie le réseau
-      const network = await prov.getNetwork();
-      const chainId = Number(network.chainId);
-
-      if (!ALLOWED_CHAIN_IDS.includes(chainId)) {
-        setDebug(
-          `⚠️ Mauvais réseau.\n` +
-            `Mets MetaMask sur "Localhost 8545" (chainId 31337 ou 1337).\n` +
-            `Ton chainId actuel = ${chainId}.`
-        );
-        return;
-      }
-
-      const accounts = await window.ethereum.request({
+      const [acc] = await window.ethereum.request({
         method: "eth_requestAccounts",
       });
 
-      const signer = await prov.getSigner();
+      const signer = await provider.getSigner();
+      const code = await provider.getCode(CONTRACT_ADDRESS);
+      if (code === "0x") throw new Error("Adresse contrat invalide");
 
-      // Vérifie que l'adresse est bien un contrat
-      const code = await prov.getCode(CONTRACT_ADDRESS);
-      if (!code || code === "0x") {
-        setDebug(
-          `⚠️ L'adresse ${CONTRACT_ADDRESS} n'est pas un contrat sur ce réseau.\n` +
-            `👉 Si tu as redémarré "hardhat node", redeploy + update l'adresse dans le front.`
-        );
-        return;
-      }
-
-      const monopolyContract = new ethers.Contract(
+      const c = new ethers.Contract(
         CONTRACT_ADDRESS,
         MonopolyABI.abi,
         signer
       );
 
-      setAccount(accounts[0]);
-      setContract(monopolyContract);
-
-      // auto-load
-      await loadAssets(monopolyContract, accounts[0]);
+      setAccount(acc);
+      setContract(c);
+      await loadAssets(c, acc);
     } catch (e) {
-      console.error(e);
-      setDebug(`❌ connectWallet: ${readableError(e)}`);
+      setDebug(readableError(e));
     } finally {
       setLoading(false);
     }
   };
 
-  // --------------------
-  // LOAD ASSETS
-  // --------------------
-  const loadAssets = async (c = contract, acc = account) => {
-    try {
-      if (!c || !acc) return;
-      setDebug("");
-      setLoading(true);
+  // ---------- load assets (AVEC METADATA IPFS) ----------
+const loadAssets = async (c = contract, acc = account) => {
+  if (!c || !acc) return;
 
-      const loaded = [];
+  setLoading(true);
+  setDebug("");
 
-      const nextId = await c.getNextTokenId(); // BigInt
-      const max = Number(nextId);
+  try {
+    const max = Number(await c.getNextTokenId());
+    const list = [];
 
-      for (let id = 1; id < max; id++) {
-        try {
-          const asset = await c.getAsset(id);
-          const balance = await c.balanceOf(acc, id);
+    for (let id = 1; id < max; id++) {
+      const asset = await c.getAsset(id);
+      const bal = await c.balanceOf(acc, id);
 
-          const metadataUrl = toGatewayUrl(asset.ipfsHash);
-          let metadata = null;
-          try {
-            const res = await fetch(metadataUrl);
-            if (res.ok) metadata = await res.json();
-          } catch {
-            // ignore
-          }
-
-          loaded.push({
-            id,
-            name: asset.name,
-            valueWei: asset.value, // BigInt
-            valueStr: asset.value.toString(),
-            valueEth: ethers.formatEther(asset.value),
-            type: asset.assetType,
-            ipfs: asset.ipfsHash,
-            owned: balance.toString(),
-            metadata,
-          });
-        } catch (e) {
-          console.log("load asset failed for id", id, e);
+      let metadata = null;
+      try {
+const res = await fetch(ipfsToHttp(asset.ipfsHash));
+        if (res.ok) {
+          metadata = await res.json();
+           console.log(` Metadata asset ${id}:`, metadata);
         }
+      } catch (e) {
+        console.warn("Erreur IPFS metadata", e);
       }
 
-      setAssets(loaded);
-      if (loaded.length === 0) {
-        setDebug("ℹ️ Aucun asset trouvé. As-tu bien exécuté ton script seedAssets ?");
-      }
-    } catch (e) {
-      console.error(e);
-      setDebug(`❌ loadAssets: ${readableError(e)}`);
-    } finally {
-      setLoading(false);
+      list.push({
+        id,
+        name: asset.name,
+        valueWei: asset.value,
+        valueEth: ethers.formatEther(asset.value),
+        owned: bal.toString(),
+        metadata,
+      });
     }
-  };
 
-  // --------------------
-  // BUY (Option B)
-  // --------------------
+    setAssets(list);
+  } catch (e) {
+    setDebug(readableError(e));
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+  // ---------- buy ----------
   const buy = async (asset) => {
+    if (!contract) return;
+
+    setLoading(true);
+    setDebug("");
+
     try {
-      if (!contract || !account) return;
-
-      setDebug("");
-      setLoading(true);
-
-      // buyAsset payable => value = prix exact
-      const tx = await contract.buyAsset(asset.id, { value: asset.valueWei });
+      const tx = await contract.buyAsset(asset.id, {
+        value: asset.valueWei,
+      });
       await tx.wait();
-
       await loadAssets();
     } catch (e) {
-      console.error(e);
-      setDebug(`❌ Achat impossible: ${readableError(e)}`);
+      setDebug(readableError(e));
     } finally {
       setLoading(false);
     }
   };
 
-  // --------------------
-  // UI
-  // --------------------
+  // ---------- UI ----------
   return (
     <div className="App">
-      <h1>🎲 Monopoly DApp</h1>
+      <h1> Monopoly DApp</h1>
 
       {!account ? (
         <button onClick={connectWallet} disabled={loading}>
-          {loading ? "Connexion..." : "Connect Wallet"}
+          Connect Wallet
         </button>
       ) : (
         <>
-          <p>Wallet connecté : {account}</p>
+          <p>Wallet : {account}</p>
           <button onClick={() => loadAssets()} disabled={loading}>
-            {loading ? "Chargement..." : "Charger les assets"}
+            Charger assets
           </button>
         </>
       )}
 
-      {debug && (
-        <p
-          style={{
-            maxWidth: 900,
-            margin: "12px auto",
-            padding: 12,
-            border: "1px solid #ddd",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {debug}
-        </p>
-      )}
+      {debug && <p className="debug">{debug}</p>}
 
       <div className="assets">
-        {assets.length === 0 && account && <p>Aucun asset trouvé.</p>}
+        {assets.map((a) => (
+          <div key={a.id} className="asset-card">
+            <h3>{a.name}</h3>
+            <p>ID: {a.id}</p>
+            <p>ETH: {a.valueEth}</p>
+            <p>Possédé: {a.owned}</p>
 
-        {assets.map((asset) => {
-          const imgVal = asset.metadata?.image;
-          const imgUrl = imgVal
-            ? toGatewayUrl(imgVal, "https://cloudflare-ipfs.com/ipfs/")
-            : "";
+         
+          {a.metadata?.image && (
+  <>
+    <p style={{ fontSize: "12px" }}>
+      Image IPFS: {a.metadata.image}
+    </p>
 
-          return (
-            <div key={asset.id} className="asset-card">
-              <h3>{asset.name}</h3>
+    <img
+      src={ipfsToHttp(a.metadata.image)}
+      alt={a.name}
+      style={{
+        width: "200px",
+        borderRadius: "8px",
+        marginTop: "10px",
+        border: "1px solid #ccc",
+      }}
+      onError={(e) => {
+        console.error("Erreur image IPFS", a.metadata.image);
+        e.target.style.display = "none";
+      }}
+    />
+  </>
+)}
 
-              <p>ID: {asset.id}</p>
-              <p>Prix (wei): {asset.valueStr}</p>
-              <p>Prix (ETH): {asset.valueEth}</p>
-              <p>Possédé: {asset.owned}</p>
-              <p>Type: {String(asset.type)}</p>
-
-              {imgUrl && (
-                <img
-                  src={imgUrl}
-                  alt={asset.name}
-                  width="220"
-                  onError={(e) => {
-                    const cid = ipfsToCid(imgVal);
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = `https://cloudflare-ipfs.com/ipfs/${cid}`;
-                  }}
-                />
-              )}
-
-              {asset.metadata?.description && <p>{asset.metadata.description}</p>}
-
-              <button onClick={() => buy(asset)} disabled={loading} style={{ marginTop: 10 }}>
-                {loading ? "..." : "Acheter"}
-              </button>
-            </div>
-          );
-        })}
+            <button onClick={() => buy(a)} disabled={loading}>
+              Acheter
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
