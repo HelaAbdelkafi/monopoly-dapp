@@ -1,33 +1,57 @@
 const { ethers } = require("hardhat");
 
+function sleep(seconds) {
+  return new Promise(resolve => setTimeout(resolve, seconds * 1000));
+}
+
 async function main() {
-  const CONTRACT = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
+  const CONTRACT = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9";
+  
+  const [deployer] = await ethers.getSigners();
   const assets = await ethers.getContractAt("MonopolyAssets", CONTRACT);
 
   const list = [
     {
       name: "Gare du Nord",
-      type: 1, // STATION
+      type: 1,
       value: 200,
-      ipfs: "ipfs://bafkreicb7qzk4fhzticsj6fec6wr5tfo7rc4wpsoseqk4jrpby7nw57pyy",
+       ipfs: "ipfs://bafkreiec54puwegsfr2jheyhkaywkd3vy34627abzvkn5ujdsftwztq4fm"
     },
     {
       name: "Gare de Lyon",
-      type: 1, // STATION
+      type: 1,
       value: 200,
-      ipfs: "ipfs://bafkreiflbn2hqi4ckppqt7lep5btispnjpba7xesg5ki3dzvwrmquwgmjm",
+       ipfs: "ipfs://bafkreibjgezjszm4gl42dsihgd22jgdyguyyhjdy2y5stytr4epn25i22u"
     },
+    {
+      name: "Rue de la Paix",
+      type: 0,
+      value: 400,
+      ipfs: "ipfs://bafkreiesiygdbt6q5ycklwwfahzksdafion5m4vkfdnp2v2y35lyoa5pkm"
+    }
+
   ];
 
-  console.log("Seeding assets...");
-
+  console.log("  Création des assets...");
+  
   for (const a of list) {
     const tx = await assets.createAsset(a.name, a.type, a.value, a.ipfs);
     await tx.wait();
-    console.log(`✅ Créé: ${a.name}`);
+    console.log(`  Créé: ${a.name}`);
   }
 
-  console.log("🎉 Seed terminé !");
+ console.log("Création des assets...");
+
+for (const a of list) {
+  const tx = await assets.createAsset(a.name, a.type, a.value, a.ipfs);
+  await tx.wait();
+  console.log(`Créé: ${a.name}`);
+}
+
+console.log("Seed terminé !");
+
+
+  console.log("\  Seed terminé !");
 }
 
 main().catch((e) => {
